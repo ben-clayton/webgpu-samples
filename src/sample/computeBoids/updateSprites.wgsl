@@ -61,21 +61,21 @@ fn main(@builtin(global_invocation_id) GlobalInvocationID : vec3u) {
   vVel += (cMass * params.rule1Scale) + (colVel * params.rule2Scale) + (cVel * params.rule3Scale);
 
   // clamp velocity for a more pleasing simulation
-  vVel = normalize(vVel) * clamp(length(vVel), 0.0, 0.1);
+  vVel = normalize(vVel) * clamp(length(vVel), 0, 0.1);
   // kinematic update
   vPos = vPos + (vVel * params.deltaT);
   // Wrap around boundary
-  if (vPos.x < -1.0) {
-    vPos.x = 1.0;
+  if (vPos.x < -1) {
+    vPos.x = 1;
   }
-  if (vPos.x > 1.0) {
-    vPos.x = -1.0;
+  if (vPos.x > 1) {
+    vPos.x = -1;
   }
-  if (vPos.y < -1.0) {
-    vPos.y = 1.0;
+  if (vPos.y < -1) {
+    vPos.y = 1;
   }
-  if (vPos.y > 1.0) {
-    vPos.y = -1.0;
+  if (vPos.y > 1) {
+    vPos.y = -1;
   }
   // Write back
   particlesB.particles[index].pos = vPos;

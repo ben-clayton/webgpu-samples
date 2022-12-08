@@ -9,10 +9,10 @@ fn vert_main(
     (a_pos.x * cos(angle)) - (a_pos.y * sin(angle)),
     (a_pos.x * sin(angle)) + (a_pos.y * cos(angle))
   );
-  return vec4(pos + a_particlePos, 0.0, 1.0);
+  return vec4(pos + a_particlePos, 0, 1);
 }
 
 @fragment
 fn frag_main() -> @location(0) vec4f {
-  return vec4(1.0, 1.0, 1.0, 1.0);
+  return vec4(1);
 }
