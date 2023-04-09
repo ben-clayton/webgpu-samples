@@ -1,5 +1,9 @@
 import { mat4, vec3 } from 'gl-matrix';
 import { makeSample, SampleInit } from '../../components/SampleLayout';
+import {
+  SortInPlaceElementType,
+  createIndexSorter,
+} from '../../external/lokokung/webgpu-sort/sort.module';
 
 import commonWGSL from './common.wgsl';
 import groundWGSL from './ground.wgsl';
@@ -7,10 +11,10 @@ import particleWGSL from './particle.wgsl';
 import simulationWGSL from './simulation.wgsl';
 import probabilityMapWGSL from './probabilityMap.wgsl';
 
-const numParticles = 40000;
+const numParticles = 30000;
 const shadowResolution = 1024;
-const particlePositionOffset = 0;
-const particleColorOffset = 4 * 4;
+// const particlePositionOffset = 0;
+// const particleColorOffset = 4 * 4;
 const particleInstanceByteSize =
   3 * 4 + // position
   1 * 4 + // lifetime
@@ -42,6 +46,16 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
     usage: GPUBufferUsage.VERTEX | GPUBufferUsage.STORAGE,
   });
 
+  const particleIndexBuffer = device.createBuffer({
+    size: numParticles * 4,
+    usage: GPUBufferUsage.INDEX | GPUBufferUsage.STORAGE,
+  });
+
+  const particlesDistanceBuffer = device.createBuffer({
+    size: numParticles * 4,
+    usage: GPUBufferUsage.STORAGE,
+  });
+
   //////////////////////////////////////////////////////////////////////////////
   // Shadow objects
   //////////////////////////////////////////////////////////////////////////////
@@ -66,11 +80,21 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
     entries: [
       {
         binding: 0,
+        visibility: GPUShaderStage.VERTEX,
+        buffer: { type: 'read-only-storage' },
+      },
+      {
+        binding: 1,
+        visibility: GPUShaderStage.VERTEX,
+        buffer: { type: 'read-only-storage' },
+      },
+      {
+        binding: 2,
         visibility: GPUShaderStage.FRAGMENT,
         texture: { viewDimension: '2d', sampleType: 'depth' },
       },
       {
-        binding: 1,
+        binding: 3,
         visibility: GPUShaderStage.FRAGMENT,
         sampler: { type: 'comparison' },
       },
@@ -81,10 +105,26 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
     entries: [
       {
         binding: 0,
-        resource: shadowDepthTexture.createView({ format: 'depth24plus' }),
+        resource: {
+          buffer: particlesBuffer,
+          offset: 0,
+          size: numParticles * particleInstanceByteSize,
+        },
       },
       {
         binding: 1,
+        resource: {
+          buffer: particleIndexBuffer,
+          offset: 0,
+          size: numParticles * 4,
+        },
+      },
+      {
+        binding: 2,
+        resource: shadowDepthTexture.createView({ format: 'depth24plus' }),
+      },
+      {
+        binding: 3,
         resource: device.createSampler({ compare: 'greater' }),
       },
     ],
@@ -97,7 +137,7 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
     entries: [
       {
         binding: 0,
-        visibility: GPUShaderStage.VERTEX,
+        visibility: GPUShaderStage.VERTEX | GPUShaderStage.COMPUTE,
         buffer: { type: 'uniform' },
       },
     ],
@@ -134,32 +174,13 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
     entryPoint: 'vs_main',
     buffers: [
       {
-        // instanced particles buffer
-        arrayStride: particleInstanceByteSize,
-        stepMode: 'instance',
-        attributes: [
-          {
-            // position
-            shaderLocation: 0,
-            offset: particlePositionOffset,
-            format: 'float32x3',
-          },
-          {
-            // color
-            shaderLocation: 1,
-            offset: particleColorOffset,
-            format: 'float32x4',
-          },
-        ],
-      },
-      {
         // quad vertex buffer
         arrayStride: 2 * 4, // vec2<f32>
         stepMode: 'vertex',
         attributes: [
           {
             // vertex positions
-            shaderLocation: 2,
+            shaderLocation: 0,
             offset: 0,
             format: 'float32x2',
           },
@@ -168,9 +189,46 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
     ],
   };
 
+  const renderParticlesLayout = device.createBindGroupLayout({
+    entries: [
+      {
+        binding: 0,
+        visibility: GPUShaderStage.VERTEX,
+        buffer: { type: 'read-only-storage' },
+      },
+      {
+        binding: 1,
+        visibility: GPUShaderStage.VERTEX,
+        buffer: { type: 'read-only-storage' },
+      },
+    ],
+  });
+
+  const renderParticlesBindGroup = device.createBindGroup({
+    layout: renderParticlesLayout,
+    entries: [
+      {
+        binding: 0,
+        resource: {
+          buffer: particlesBuffer,
+          offset: 0,
+          size: numParticles * particleInstanceByteSize,
+        },
+      },
+      {
+        binding: 1,
+        resource: {
+          buffer: particleIndexBuffer,
+          offset: 0,
+          size: numParticles * 4,
+        },
+      },
+    ],
+  });
+
   const particlesShadowRenderPipeline = device.createRenderPipeline({
     layout: device.createPipelineLayout({
-      bindGroupLayouts: [viewParamsLayout],
+      bindGroupLayouts: [viewParamsLayout, renderParticlesLayout],
     }),
     vertex: particlesVertexState,
     fragment: {
@@ -200,12 +258,12 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
           blend: {
             color: {
               srcFactor: 'src-alpha',
-              dstFactor: 'one',
+              dstFactor: 'one-minus-src-alpha',
               operation: 'add',
             },
             alpha: {
               srcFactor: 'one',
-              dstFactor: 'one',
+              dstFactor: 'one-minus-src-alpha',
               operation: 'add',
             },
           },
@@ -274,6 +332,49 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
       depthStoreOp: 'store',
     },
   };
+
+  const particlesSorter = createIndexSorter({
+    device,
+    type: {
+      type: 'Particle',
+      definition: `
+      struct Particle {
+        position : vec3f,
+        lifetime : f32,
+        color    : vec4f,
+        velocity : vec3f,
+      }`,
+      dist: {
+        distType: SortInPlaceElementType.f32,
+        entryPoint: '_dist',
+        code: `
+        struct ViewParams {
+          shadow_model_view_proj : mat4x4<f32>,
+          camera_model_view_proj : mat4x4<f32>,
+          camera_right : vec3<f32>,
+          camera_up : vec3<f32>,
+        }
+        @binding(0) @group(1) var<uniform> view_params : ViewParams;
+
+        fn _dist(p: Particle) -> f32 {
+          return length(view_params.camera_model_view_proj * vec4f(p.position, 1.0));
+        }
+        `,
+      },
+    },
+    n: numParticles,
+    mode: 'descending',
+    buffer: particlesBuffer,
+    k: particlesDistanceBuffer,
+    v: particleIndexBuffer,
+    bindGroups: [
+      {
+        index: 1,
+        bindGroupLayout: viewParamsLayout,
+        bindGroup: viewParamsBindGroup,
+      },
+    ],
+  });
 
   //////////////////////////////////////////////////////////////////////////////
   // Quad vertex buffer
@@ -619,6 +720,10 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
       passEncoder.dispatchWorkgroups(Math.ceil(numParticles / 64));
       passEncoder.end();
     }
+    // Sort the particles w.r.t the camera
+    {
+      particlesSorter.encode(commandEncoder);
+    }
     // Draw the shadow map
     {
       // Copy shadowViewParamsBuffer -> viewParamsBuffer
@@ -631,8 +736,8 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
       );
       const passEncoder = commandEncoder.beginRenderPass(shadowPassDescriptor);
       passEncoder.setBindGroup(0, viewParamsBindGroup);
-      passEncoder.setVertexBuffer(0, particlesBuffer);
-      passEncoder.setVertexBuffer(1, quadVertexBuffer);
+      passEncoder.setBindGroup(1, renderParticlesBindGroup);
+      passEncoder.setVertexBuffer(0, quadVertexBuffer);
       // Draw the particles
       passEncoder.setPipeline(particlesShadowRenderPipeline);
       passEncoder.draw(6, numParticles, 0, 0);
@@ -653,8 +758,7 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
       const passEncoder = commandEncoder.beginRenderPass(renderPassDescriptor);
       passEncoder.setBindGroup(0, viewParamsBindGroup);
       passEncoder.setBindGroup(1, shadowBuffersBindGroup);
-      passEncoder.setVertexBuffer(0, particlesBuffer);
-      passEncoder.setVertexBuffer(1, quadVertexBuffer);
+      passEncoder.setVertexBuffer(0, quadVertexBuffer);
       // Draw the ground plane
       passEncoder.setPipeline(groundRenderPipeline);
       passEncoder.draw(6, 1, 0, 0);

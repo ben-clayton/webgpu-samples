@@ -2,9 +2,8 @@
 // Vertex shader
 ////////////////////////////////////////////////////////////////////////////////
 struct VertexInput {
-  @location(0) position : vec3f,
-  @location(1) color : vec4f,
-  @location(2) quad_pos : vec2f, // -1..+1
+  @builtin(instance_index) index : u32,
+  @location(0) quad_pos : vec2f, // -1..+1
 }
 
 struct VertexOutput {
@@ -17,10 +16,10 @@ struct VertexOutput {
 @vertex
 fn vs_main(in : VertexInput) -> VertexOutput {
   var quad_pos = mat2x3<f32>(view_params.camera_right, view_params.camera_up) * in.quad_pos;
-  var position = in.position + quad_pos * 0.015;
+  var position = particles[particleIndices[in.index]].position + quad_pos * 0.015;
   var out : VertexOutput;
   out.position = view_params.camera_model_view_proj * vec4f(position, 1.0);
-  out.color = in.color;
+  out.color = particles[particleIndices[in.index]].color;
   out.quad_pos = in.quad_pos;
   out.shadow_coords = view_params.shadow_model_view_proj * vec4f(position, 1.0);
   return out;
@@ -48,6 +47,6 @@ fn fs_shadow_main(in : VertexOutput) -> @location(0) vec4f {
 @fragment
 fn fs_draw_main(in : VertexOutput) -> @location(0) vec4f {
   var color = in.color.rgb;
-  color *= 0.2 * lighting(in.shadow_coords);
+  color *= 0.8 * lighting(in.shadow_coords);
   return vec4(color.rgb, particle_alpha(in));
 }

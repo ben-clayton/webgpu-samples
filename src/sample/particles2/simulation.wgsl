@@ -6,13 +6,6 @@ struct SimulationParams {
   seed : vec4f,
 }
 
-struct Particle {
-  position : vec3f,
-  lifetime : f32,
-  color    : vec4f,
-  velocity : vec3f,
-}
-
 struct Particles {
   particles : array<Particle>,
 }

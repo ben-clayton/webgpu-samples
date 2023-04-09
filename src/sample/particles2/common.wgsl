@@ -14,12 +14,21 @@ struct ViewParams {
   camera_up : vec3<f32>,
 }
 
+struct Particle {
+  position : vec3f,
+  lifetime : f32,
+  color    : vec4f,
+  velocity : vec3f,
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // Bindings
 ////////////////////////////////////////////////////////////////////////////////
 @binding(0) @group(0) var<uniform> view_params : ViewParams;
-@binding(0) @group(1) var shadow_depth : texture_depth_2d;
-@binding(1) @group(1) var shadow_depth_sampler : sampler_comparison;
+@binding(0) @group(1) var<storage, read> particles : array<Particle>;
+@binding(1) @group(1) var<storage, read> particleIndices: array<u32>;
+@binding(2) @group(1) var shadow_depth : texture_depth_2d;
+@binding(3) @group(1) var shadow_depth_sampler : sampler_comparison;
 
 
 ////////////////////////////////////////////////////////////////////////////////
