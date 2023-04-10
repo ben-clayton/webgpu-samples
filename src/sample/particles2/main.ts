@@ -1,9 +1,6 @@
 import { mat4, vec3 } from 'gl-matrix';
 import { makeSample, SampleInit } from '../../components/SampleLayout';
-import {
-  SortInPlaceElementType,
-  createIndexSorter,
-} from '../../external/lokokung/webgpu-sort/sort.module';
+import { SortInPlaceElementType, createIndexSorter } from 'webgpu-sort';
 
 import commonWGSL from './common.wgsl';
 import groundWGSL from './ground.wgsl';
