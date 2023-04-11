@@ -1,6 +1,6 @@
 import { mat4, vec3 } from 'gl-matrix';
 import { makeSample, SampleInit } from '../../components/SampleLayout';
-import { SortInPlaceElementType, createIndexSorter } from 'webgpu-sort';
+import { ComparisonElementType, createIndexSorter } from 'webgpu-sort';
 
 import commonWGSL from './common.wgsl';
 import groundWGSL from './ground.wgsl';
@@ -46,11 +46,6 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
   const particleIndexBuffer = device.createBuffer({
     size: numParticles * 4,
     usage: GPUBufferUsage.INDEX | GPUBufferUsage.STORAGE,
-  });
-
-  const particlesDistanceBuffer = device.createBuffer({
-    size: numParticles * 4,
-    usage: GPUBufferUsage.STORAGE,
   });
 
   //////////////////////////////////////////////////////////////////////////////
@@ -342,7 +337,7 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
         velocity : vec3f,
       }`,
       dist: {
-        distType: SortInPlaceElementType.f32,
+        distType: ComparisonElementType.f32,
         entryPoint: '_dist',
         code: `
         struct ViewParams {
@@ -357,20 +352,19 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
           return length(view_params.camera_model_view_proj * vec4f(p.position, 1.0));
         }
         `,
+        bindGroups: [
+          {
+            index: 1,
+            bindGroupLayout: viewParamsLayout,
+            bindGroup: viewParamsBindGroup,
+          },
+        ],
       },
     },
     n: numParticles,
     mode: 'descending',
     buffer: particlesBuffer,
-    k: particlesDistanceBuffer,
-    v: particleIndexBuffer,
-    bindGroups: [
-      {
-        index: 1,
-        bindGroupLayout: viewParamsLayout,
-        bindGroup: viewParamsBindGroup,
-      },
-    ],
+    indices: particleIndexBuffer,
   });
 
   //////////////////////////////////////////////////////////////////////////////
