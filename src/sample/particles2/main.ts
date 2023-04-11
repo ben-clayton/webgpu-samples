@@ -17,7 +17,9 @@ const particleInstanceByteSize =
   1 * 4 + // lifetime
   4 * 4 + // color
   3 * 4 + // velocity
-  1 * 4 + // padding
+  1 * 4 + // size
+  1 * 4 + // age
+  3 * 4 + // padding
   0;
 
 const init: SampleInit = async ({ canvas, pageState, gui }) => {
@@ -71,21 +73,25 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
   const shadowBuffersLayout = device.createBindGroupLayout({
     entries: [
       {
+        // particlesBuffer
         binding: 0,
         visibility: GPUShaderStage.VERTEX,
         buffer: { type: 'read-only-storage' },
       },
       {
+        // particlesIndexBuffer
         binding: 1,
         visibility: GPUShaderStage.VERTEX,
         buffer: { type: 'read-only-storage' },
       },
       {
+        // shadowDepthTexture
         binding: 2,
         visibility: GPUShaderStage.FRAGMENT,
         texture: { viewDimension: '2d', sampleType: 'depth' },
       },
       {
+        // sampler
         binding: 3,
         visibility: GPUShaderStage.FRAGMENT,
         sampler: { type: 'comparison' },
@@ -129,7 +135,10 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
     entries: [
       {
         binding: 0,
-        visibility: GPUShaderStage.VERTEX | GPUShaderStage.COMPUTE,
+        visibility:
+          GPUShaderStage.VERTEX |
+          GPUShaderStage.FRAGMENT |
+          GPUShaderStage.COMPUTE,
         buffer: { type: 'uniform' },
       },
     ],
@@ -249,7 +258,7 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
           format: presentationFormat,
           blend: {
             color: {
-              srcFactor: 'src-alpha',
+              srcFactor: 'one',
               dstFactor: 'one-minus-src-alpha',
               operation: 'add',
             },
@@ -282,6 +291,10 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
     3 * 4 + // camera_right : vec3<f32>
     4 + // padding
     3 * 4 + // camera_up : vec3<f32>
+    4 + // padding
+    3 * 4 + // camera_forward : vec3<f32>
+    4 + // padding
+    3 * 4 + // light_dir : vec3<f32>
     4 + // padding
     0;
   const viewParamsBuffer = device.createBuffer({
@@ -330,28 +343,30 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
     type: {
       type: 'Particle',
       definition: `
-      struct Particle {
-        position : vec3f,
-        lifetime : f32,
-        color    : vec4f,
-        velocity : vec3f,
-      }`,
+struct Particle {
+  position : vec3f,
+  lifetime : f32,
+  color    : vec4f,
+  velocity : vec3f,
+  size     : f32,
+  age      : f32,
+}
+struct ViewParams {
+  shadow_model_view_proj : mat4x4<f32>,
+  camera_model_view_proj : mat4x4<f32>,
+  camera_right : vec3<f32>,
+  camera_up : vec3<f32>,
+  camera_forward : vec3<f32>,
+  light_dir : vec3<f32>,
+}`,
       dist: {
         distType: ComparisonElementType.f32,
-        entryPoint: '_dist',
+        entryPoint: 'sort_by_distance',
         code: `
-        struct ViewParams {
-          shadow_model_view_proj : mat4x4<f32>,
-          camera_model_view_proj : mat4x4<f32>,
-          camera_right : vec3<f32>,
-          camera_up : vec3<f32>,
-        }
-        @binding(0) @group(1) var<uniform> view_params : ViewParams;
-
-        fn _dist(p: Particle) -> f32 {
-          return length(view_params.camera_model_view_proj * vec4f(p.position, 1.0));
-        }
-        `,
+@binding(0) @group(1) var<uniform> view_params : ViewParams;
+fn sort_by_distance(p: Particle) -> f32 {
+  return (view_params.camera_model_view_proj * vec4f(p.position, 1.0)).z;
+}`,
         bindGroups: [
           {
             index: 1,
@@ -594,7 +609,8 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
     buffer: GPUBuffer,
     shadowMVP: mat4,
     cameraMVP: mat4,
-    cameraView: mat4
+    cameraView: mat4,
+    lightDir: vec3
   ) => {
     // prettier-ignore
     device.queue.writeBuffer(
@@ -620,6 +636,12 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
         cameraView[1], cameraView[5], cameraView[9], // camera_up
 
         0, // padding
+
+        -cameraView[2], -cameraView[6], -cameraView[10], // camera_forward
+
+        0, // padding
+
+        lightDir[0], lightDir[1], lightDir[2], // light_dir
       ])
     );
   };
@@ -628,6 +650,7 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
   let cameraRotation = 0.0;
   let lightRotation = 0.0;
 
+  const up = vec3.fromValues(0, 0, 1); // This sample uses Z up
   const cameraProjection = mat4.create();
   const cameraView = mat4.create();
   const cameraMVP = mat4.create();
@@ -638,7 +661,7 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
     if (!pageState.active) return;
 
     time += simulationParams.deltaTime;
-    cameraRotation = 0.1 * Math.cos(0.1 * time);
+    cameraRotation = 0.5 * Math.sin(0.15 * time);
     lightRotation += 0.1 * simulationParams.deltaTime;
 
     device.queue.writeBuffer(
@@ -657,44 +680,44 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
     );
 
     // Update the shadow views
+    const lightPos = vec3.fromValues(
+      2.5 * Math.sin(lightRotation),
+      2.5 * -Math.cos(lightRotation),
+      2
+    );
+    const lightTarget = vec3.fromValues(0, 0, -1);
+    const lightDir = vec3.normalize(
+      vec3.create(),
+      vec3.sub(vec3.create(), lightTarget, lightPos)
+    );
     {
-      mat4.lookAt(
-        shadowView,
-        vec3.fromValues(
-          2.5 * Math.sin(lightRotation),
-          2.5 * -Math.cos(lightRotation),
-          2
-        ),
-        vec3.fromValues(0, 0, -1),
-        vec3.fromValues(0, 0, 1)
-      );
+      mat4.lookAt(shadowView, lightPos, lightTarget, up);
       mat4.multiply(shadowMVP, shadowProjection, shadowView);
       updateViewParams(
         shadowViewParamsBuffer,
         shadowMVP,
         shadowMVP,
-        shadowView
+        shadowView,
+        lightDir
       );
     }
 
     // Update the camera views
     {
-      mat4.lookAt(
-        cameraView,
-        vec3.fromValues(
-          2 * Math.sin(cameraRotation),
-          2 * -Math.cos(cameraRotation),
-          2
-        ),
-        vec3.fromValues(0, 0, 0),
-        vec3.fromValues(0, 0, 1)
+      const cameraPos = vec3.fromValues(
+        2 * Math.sin(cameraRotation),
+        2 * -Math.cos(cameraRotation),
+        2
       );
+      const cameraTarget = vec3.create();
+      mat4.lookAt(cameraView, cameraPos, cameraTarget, up);
       mat4.multiply(cameraMVP, cameraProjection, cameraView);
       updateViewParams(
         renderViewParamsBuffer,
         shadowMVP,
         cameraMVP,
-        cameraView
+        cameraView,
+        lightDir
       );
     }
     const swapChainTexture = context.getCurrentTexture();
@@ -705,10 +728,13 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
     const commandEncoder = device.createCommandEncoder();
     // Simulate the particles
     {
+      // Slowly increate the spawn rate to prevent a 'gush' of particles at T0
+      const spawnRate = Math.min(time, 10) / 10;
+      const numWorkgroups = Math.ceil((numParticles * spawnRate) / 64);
       const passEncoder = commandEncoder.beginComputePass();
       passEncoder.setPipeline(simulationPipeline);
       passEncoder.setBindGroup(0, computeBindGroup);
-      passEncoder.dispatchWorkgroups(Math.ceil(numParticles / 64));
+      passEncoder.dispatchWorkgroups(numWorkgroups);
       passEncoder.end();
     }
     // Sort the particles w.r.t the camera

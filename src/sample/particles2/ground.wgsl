@@ -6,10 +6,10 @@ struct VertexOut {
 
 @vertex
 fn vs_main(@builtin(vertex_index) VertexIndex : u32) -> VertexOut {
-  const pos_a = vec3f(-3, -3, ground_height); // a ---- b
-  const pos_b = vec3f( 3, -3, ground_height); // |      |
-  const pos_c = vec3f(-3,  3, ground_height); // |      |
-  const pos_d = vec3f( 3,  3, ground_height); // c ---- d
+  const pos_a = vec3f(-3, -3, GroundHeight); // a ---- b
+  const pos_b = vec3f( 3, -3, GroundHeight); // |      |
+  const pos_c = vec3f(-3,  3, GroundHeight); // |      |
+  const pos_d = vec3f( 3,  3, GroundHeight); // c ---- d
   const coord_a = vec2f(0, 0);
   const coord_b = vec2f(1, 0);
   const coord_c = vec2f(0, 1);
@@ -28,5 +28,5 @@ fn fs_main(in : VertexOut) -> @location(0) vec4<f32> {
   let diffuse = select(vec3(0.3, 0.3, 0.3),
                        vec3(0.2, 0.2, 0.2),
                        (f.x < 0.5) != (f.y < 0.5));
-  return vec4(diffuse * lighting(in.shadow_coords), 1);
+  return vec4(diffuse * mix(0.2, 1.0, lit(in.shadow_coords)), 1);
 }

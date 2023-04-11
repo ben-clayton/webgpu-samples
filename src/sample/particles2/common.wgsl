@@ -1,8 +1,8 @@
 ////////////////////////////////////////////////////////////////////////////////
 // Constants
 ////////////////////////////////////////////////////////////////////////////////
-const ground_height = -1.0;
-const shadow_bias = -0.0002;
+const GroundHeight = -1.0;
+const ShadowBias = -0.0001;
 
 ////////////////////////////////////////////////////////////////////////////////
 // Structures
@@ -12,6 +12,8 @@ struct ViewParams {
   camera_model_view_proj : mat4x4<f32>,
   camera_right : vec3<f32>,
   camera_up : vec3<f32>,
+  camera_forward : vec3<f32>,
+  light_dir : vec3<f32>,
 }
 
 struct Particle {
@@ -19,6 +21,8 @@ struct Particle {
   lifetime : f32,
   color    : vec4f,
   velocity : vec3f,
+  size     : f32,
+  age      : f32,
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -48,9 +52,18 @@ fn rand() -> f32 {
   return rand_seed.y;
 }
 
-fn lighting(shadow_clip_space : vec4f) -> f32 {
+fn lit(shadow_clip_space : vec4f) -> f32 {
   let shadow_ndc = shadow_clip_space / shadow_clip_space.w;
   let shadow_uv = shadow_ndc.xy * vec2(0.5, -0.5) + vec2(0.5);
-  let in_shadow = textureSampleCompare(shadow_depth, shadow_depth_sampler, shadow_uv, shadow_ndc.z + shadow_bias);
-  return mix(1.0f, 0.7f, in_shadow);
+  var shadow = 0.0;
+  shadow += textureSampleCompare(shadow_depth, shadow_depth_sampler, shadow_uv, shadow_ndc.z + ShadowBias, vec2(-1, -1));
+  shadow += textureSampleCompare(shadow_depth, shadow_depth_sampler, shadow_uv, shadow_ndc.z + ShadowBias, vec2( 0, -1));
+  shadow += textureSampleCompare(shadow_depth, shadow_depth_sampler, shadow_uv, shadow_ndc.z + ShadowBias, vec2( 1, -1));
+  shadow += textureSampleCompare(shadow_depth, shadow_depth_sampler, shadow_uv, shadow_ndc.z + ShadowBias, vec2(-1,  0));
+  shadow += textureSampleCompare(shadow_depth, shadow_depth_sampler, shadow_uv, shadow_ndc.z + ShadowBias, vec2( 0,  0));
+  shadow += textureSampleCompare(shadow_depth, shadow_depth_sampler, shadow_uv, shadow_ndc.z + ShadowBias, vec2( 1,  0));
+  shadow += textureSampleCompare(shadow_depth, shadow_depth_sampler, shadow_uv, shadow_ndc.z + ShadowBias, vec2(-1,  1));
+  shadow += textureSampleCompare(shadow_depth, shadow_depth_sampler, shadow_uv, shadow_ndc.z + ShadowBias, vec2( 0,  1));
+  shadow += textureSampleCompare(shadow_depth, shadow_depth_sampler, shadow_uv, shadow_ndc.z + ShadowBias, vec2( 1,  1));
+  return 1 - shadow / 9;
 }
